@@ -52,10 +52,17 @@ class ReasoningAgent(ReasoningLLM):
 
     MAX_ACTIONS = 200
     DO_OBSERVATION = True
-    MODEL = "gpt-5.1"
+    # MODEL = "gpt-5.1"
+    MODEL = "claude-4-6-opus"
     MESSAGE_LIMIT = 5
     REASONING_EFFORT = "high"
     ZONE_SIZE = 16
+    RESPONSE_FIELD_MAX_LENGTHS = {
+        "reason": 2000,
+        "short_description": 500,
+        "hypothesis": 2000,
+        "aggregated_findings": 2000,
+    }
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -96,6 +103,8 @@ class ReasoningAgent(ReasoningLLM):
         latest_frame: FrameData,
         response_message: Any,
         action_response: ReasoningActionResponse,
+        raw_function_args: Dict[str, Any] | None = None,
+        truncation_info: Dict[str, int] | None = None,
     ) -> None:
         """Persist the raw assistant message and parsed reasoning output."""
         if not hasattr(self, "recorder") or self.is_playback:
@@ -109,9 +118,26 @@ class ReasoningAgent(ReasoningLLM):
                 "frame_guid": latest_frame.guid,
                 "screen": self._latest_screen_record,
                 "assistant_message": dump_for_logging(response_message),
+                "raw_function_args": raw_function_args or {},
                 "parsed_response": action_response.model_dump(),
+                "truncation_info": truncation_info or {},
             }
         )
+
+    def truncate_reasoning_fields(
+        self, function_args: Dict[str, Any]
+    ) -> tuple[Dict[str, Any], Dict[str, int]]:
+        """Trim oversized response fields before local validation."""
+        truncated_args = dict(function_args)
+        truncation_info: Dict[str, int] = {}
+
+        for field_name, max_length in self.RESPONSE_FIELD_MAX_LENGTHS.items():
+            value = truncated_args.get(field_name)
+            if isinstance(value, str) and len(value) > max_length:
+                truncation_info[field_name] = len(value)
+                truncated_args[field_name] = value[:max_length]
+
+        return truncated_args, truncation_info
 
     def clear_history(self) -> None:
         """Clear all history when transitioning between levels."""
@@ -330,12 +356,29 @@ Hint:
             if tool_calls:
                 tool_call = tool_calls[0]
                 function_args = json.loads(tool_call.function.arguments)
+                raw_function_args = dict(function_args)
                 function_args["name"] = tool_call.function.name
-                action_response = ReasoningActionResponse(**function_args)
+                truncated_args, truncation_info = self.truncate_reasoning_fields(
+                    function_args
+                )
+                if truncation_info:
+                    logger.warning(
+                        "Truncated oversized reasoning fields for local validation: %s",
+                        {
+                            field_name: {
+                                "original_length": original_length,
+                                "max_length": self.RESPONSE_FIELD_MAX_LENGTHS[field_name],
+                            }
+                            for field_name, original_length in truncation_info.items()
+                        },
+                    )
+                action_response = ReasoningActionResponse(**truncated_args)
                 self.record_reasoning_response(
                     latest_frame=latest_frame,
                     response_message=response_message,
                     action_response=action_response,
+                    raw_function_args=raw_function_args,
+                    truncation_info=truncation_info,
                 )
                 return action_response
 
