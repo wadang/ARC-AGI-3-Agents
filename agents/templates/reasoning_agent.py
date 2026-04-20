@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from ..openai_utils import (
     create_openai_client,
+    dump_for_logging,
     log_openai_request,
     log_openai_response,
 )
@@ -62,11 +63,15 @@ class ReasoningAgent(ReasoningLLM):
         self.screen_history: List[bytes] = []
         self.max_screen_history = 10  # Limit screen history to prevent memory leak
         self.client = create_openai_client()
+        self._latest_screen_record: Dict[str, Any] = {}
 
-    def save_screen_image(self, image_bytes: bytes, latest_frame: FrameData) -> str:
+    def save_screen_image(self, image_bytes: bytes, latest_frame: FrameData) -> Dict[str, str]:
         """Persist the rendered screen image for later inspection."""
         recordings_dir = os.environ.get("RECORDINGS_DIR", "recordings") or "recordings"
-        output_dir = os.path.join(recordings_dir, "reasoning_screens", self.game_id)
+        recording_guid = getattr(getattr(self, "recorder", None), "guid", "no-recording-guid")
+        output_dir = os.path.join(
+            recordings_dir, "reasoning_screens", self.game_id, recording_guid
+        )
         os.makedirs(output_dir, exist_ok=True)
 
         guid = latest_frame.guid or "no-guid"
@@ -78,7 +83,35 @@ class ReasoningAgent(ReasoningLLM):
         with open(output_path, "wb") as f:
             f.write(image_bytes)
         logger.info("Saved reasoning screen image to %s", output_path)
-        return output_path
+        return {
+            "recording_guid": recording_guid,
+            "frame_guid": guid,
+            "filename": filename,
+            "relative_path": os.path.relpath(output_path, recordings_dir),
+            "path": output_path,
+        }
+
+    def record_reasoning_response(
+        self,
+        latest_frame: FrameData,
+        response_message: Any,
+        action_response: ReasoningActionResponse,
+    ) -> None:
+        """Persist the raw assistant message and parsed reasoning output."""
+        if not hasattr(self, "recorder") or self.is_playback:
+            return
+
+        self.recorder.record(
+            {
+                "event": "reasoning_response",
+                "game_id": self.game_id,
+                "action_counter": self.action_counter,
+                "frame_guid": latest_frame.guid,
+                "screen": self._latest_screen_record,
+                "assistant_message": dump_for_logging(response_message),
+                "parsed_response": action_response.model_dump(),
+            }
+        )
 
     def clear_history(self) -> None:
         """Clear all history when transitioning between levels."""
@@ -267,7 +300,7 @@ Hint:
         )
 
     def call_llm_with_structured_output(
-        self, messages: List[Dict[str, Any]]
+        self, messages: List[Dict[str, Any]], latest_frame: FrameData
     ) -> ReasoningActionResponse:
         """Call LLM with structured output parsing for reasoning agent."""
         try:
@@ -287,18 +320,24 @@ Hint:
             )
             log_openai_response(logger, "Reasoning agent", response)
 
+            response_message = response.choices[0].message
             self.track_tokens(
-                response.usage.total_tokens, response.choices[0].message.content
+                response.usage.total_tokens, dump_for_logging(response_message)
             )
             self.capture_reasoning_from_response(response)
 
-            response_message = response.choices[0].message
             tool_calls = response_message.tool_calls
             if tool_calls:
                 tool_call = tool_calls[0]
                 function_args = json.loads(tool_call.function.arguments)
                 function_args["name"] = tool_call.function.name
-                return ReasoningActionResponse(**function_args)
+                action_response = ReasoningActionResponse(**function_args)
+                self.record_reasoning_response(
+                    latest_frame=latest_frame,
+                    response_message=response_message,
+                    action_response=action_response,
+                )
+                return action_response
 
             raise ValueError("LLM did not return a tool call.")
 
@@ -311,7 +350,7 @@ Hint:
         # Generate map image
         current_grid = latest_frame.frame[-1] if latest_frame.frame else []
         map_image = self.generate_grid_image_with_zone(current_grid)
-        self.save_screen_image(map_image, latest_frame)
+        self._latest_screen_record = self.save_screen_image(map_image, latest_frame)
 
         # Build messages
         system_prompt = self.build_user_prompt(latest_frame)
@@ -363,7 +402,7 @@ Hint:
         ]
 
         # Call LLM with structured output
-        result = self.call_llm_with_structured_output(messages)
+        result = self.call_llm_with_structured_output(messages, latest_frame)
 
         # Store current screen for next iteration (after using it)
         self.screen_history.append(map_image)
@@ -412,6 +451,8 @@ Hint:
             if len(action_response.reason) > 200
             else action_response.reason,
             "action_chosen": action.name,
+            "short_description": action_response.short_description,
+            "screen": self._latest_screen_record,
             "game_context": {
                 "score": latest_frame.levels_completed,
                 "state": latest_frame.state.name,
