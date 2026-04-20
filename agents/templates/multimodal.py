@@ -18,6 +18,7 @@ from PIL import Image
 from ..agent import Agent
 from ..openai_utils import (
     create_openai_client,
+    dump_for_logging,
     log_openai_request,
     log_openai_response,
 )
@@ -456,7 +457,7 @@ class MultiModalLLM(Agent):
             response = client.chat.completions.create(**action_request)
             log_openai_response(logger, "Multimodal next action", response)
         except openai.BadRequestError as e:
-            logger.info(f"Message dump: {self.messages}")
+            logger.info("Message dump:\n%s", dump_for_logging(self.messages))
             raise e
 
         self.track_tokens(
@@ -498,7 +499,7 @@ class MultiModalLLM(Agent):
             response = client.chat.completions.create(**find_action_request)
             log_openai_response(logger, "Multimodal action translation", response)
         except openai.BadRequestError as e:
-            logger.info(f"Message dump: {e}")
+            logger.info("OpenAI bad request: %s", e)
             raise e
 
         print(f"Assistant - Finding Action: {response.choices[0].message.content}")

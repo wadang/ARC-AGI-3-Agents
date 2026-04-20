@@ -49,9 +49,9 @@ class ReasoningActionResponse(BaseModel):
 class ReasoningAgent(ReasoningLLM):
     """A reasoning agent that tracks screen history and builds hypotheses about game rules."""
 
-    MAX_ACTIONS = 400
+    MAX_ACTIONS = 200
     DO_OBSERVATION = True
-    MODEL = "o4-mini"
+    MODEL = "gpt-5.1"
     MESSAGE_LIMIT = 5
     REASONING_EFFORT = "high"
     ZONE_SIZE = 16
@@ -413,7 +413,7 @@ Hint:
             else action_response.reason,
             "action_chosen": action.name,
             "game_context": {
-                "score": latest_frame.score,
+                "score": latest_frame.levels_completed,
                 "state": latest_frame.state.name,
                 "action_counter": self.action_counter,
                 "frame_count": len(frames),

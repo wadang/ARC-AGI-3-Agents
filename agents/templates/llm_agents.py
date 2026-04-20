@@ -9,6 +9,7 @@ from arcengine import FrameData, GameAction, GameState
 from ..agent import Agent
 from ..openai_utils import (
     create_openai_client,
+    dump_for_logging,
     log_openai_request,
     log_openai_response,
 )
@@ -128,7 +129,7 @@ class LLM(Agent):
                 response = client.chat.completions.create(**create_kwargs)
                 log_openai_response(logger, "LLM observation", response)
             except openai.BadRequestError as e:
-                logger.info(f"Message dump: {self.messages}")
+                logger.info("Message dump:\n%s", dump_for_logging(self.messages))
                 raise e
             self.track_tokens(
                 response.usage.total_tokens, response.choices[0].message.content
@@ -164,7 +165,7 @@ class LLM(Agent):
                 response = client.chat.completions.create(**create_kwargs)
                 log_openai_response(logger, "LLM action", response)
             except openai.BadRequestError as e:
-                logger.info(f"Message dump: {self.messages}")
+                logger.info("Message dump:\n%s", dump_for_logging(self.messages))
                 raise e
             self.track_tokens(response.usage.total_tokens)
             message5 = response.choices[0].message
@@ -204,7 +205,7 @@ class LLM(Agent):
                 response = client.chat.completions.create(**create_kwargs)
                 log_openai_response(logger, "LLM action", response)
             except openai.BadRequestError as e:
-                logger.info(f"Message dump: {self.messages}")
+                logger.info("Message dump:\n%s", dump_for_logging(self.messages))
                 raise e
             self.track_tokens(response.usage.total_tokens)
             message5 = response.choices[0].message
