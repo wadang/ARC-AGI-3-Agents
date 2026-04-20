@@ -6,7 +6,7 @@ import os
 import textwrap
 from typing import Any, Dict, List, Literal
 
-from arcengine import FrameData, GameAction
+from arcengine import FrameData, GameAction, GameState
 from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel, Field
 
@@ -415,7 +415,10 @@ Hint:
         self, frames: List[FrameData], latest_frame: FrameData
     ) -> GameAction:
         """Choose action using parent class tool calling with reasoning enhancement."""
-        if latest_frame.full_reset:
+        if latest_frame.full_reset or latest_frame.state in [
+            GameState.NOT_PLAYED,
+            GameState.GAME_OVER,
+        ]:
             self.clear_history()
             return GameAction.RESET
 

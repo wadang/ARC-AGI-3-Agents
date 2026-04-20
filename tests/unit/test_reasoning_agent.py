@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from arcengine import GameAction, GameState
 from agents.recorder import Recorder
 from agents.templates.reasoning_agent import (
     ReasoningActionResponse,
@@ -95,3 +96,27 @@ class TestReasoningAgentRecording:
         assert event["screen"]["recording_guid"] == "recording-guid"
         assert event["parsed_response"]["reason"] == "Test reasoning."
         assert '"name": "ACTION1"' in event["assistant_message"]
+
+
+@pytest.mark.unit
+class TestReasoningAgentActionLogic:
+    @pytest.mark.parametrize("state", [GameState.NOT_PLAYED, GameState.GAME_OVER])
+    def test_choose_action_resets_when_game_not_playable(self, sample_frame, state):
+        agent = object.__new__(ReasoningAgent)
+        agent.history = [
+            ReasoningActionResponse(
+                name="ACTION1",
+                reason="Test reasoning history entry.",
+                short_description="Prior action",
+                hypothesis="Prior hypothesis.",
+                aggregated_findings="Prior findings.",
+            )
+        ]
+        agent.screen_history = [b"old-screen"]
+
+        sample_frame.state = state
+        action = agent.choose_action([sample_frame], sample_frame)
+
+        assert action == GameAction.RESET
+        assert agent.history == []
+        assert agent.screen_history == []

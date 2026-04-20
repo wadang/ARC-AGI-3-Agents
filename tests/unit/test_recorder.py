@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import threading
 import time
 from datetime import datetime
@@ -165,7 +166,10 @@ class TestRecorderClassMethods:
         import glob
 
         for f in glob.glob(os.path.join(temp_recordings_dir, "*")):
-            os.unlink(f)
+            if os.path.isdir(f):
+                shutil.rmtree(f)
+            else:
+                os.unlink(f)
 
         test_files = [
             "game1.agent.50.guid1.recording.jsonl",

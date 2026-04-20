@@ -1,12 +1,13 @@
+from unittest.mock import Mock
+
 import pytest
 
-from agents.structs import (
+from arc_agi.scorecard import Card, Scorecard
+from arcengine import (
     ActionInput,
-    Card,
     FrameData,
     GameAction,
     GameState,
-    Scorecard,
 )
 from agents.templates.langgraph_random_agent import LangGraphRandom
 from agents.templates.random_agent import Random
@@ -120,22 +121,21 @@ class TestCard:
         assert card.game_id == "test-game"
         assert card.total_plays == 0
         assert not card.started
-        assert card.score is None
-        assert card.high_score == 0
         assert card.idx == -1
+        assert card.state == GameState.NOT_PLAYED
+        assert card.action_count is None
+        assert card.total_actions == 0
 
         card = Card(
             game_id="test-game",
             total_plays=2,
-            scores=[10, 15],
+            levels_completed=[10, 15],
             states=[GameState.GAME_OVER, GameState.WIN],
             actions=[50, 30],
             resets=[1, 0],
         )
 
         assert card.started
-        assert card.score == 15
-        assert card.high_score == 15
         assert card.state == GameState.WIN
         assert card.action_count == 30
         assert card.total_actions == 80
@@ -151,11 +151,14 @@ class TestScorecard:
         card1 = Card(
             game_id="game1",
             total_plays=2,
-            scores=[10, 20],
+            levels_completed=[10, 20],
             states=[GameState.GAME_OVER, GameState.WIN],
         )
         card2 = Card(
-            game_id="game2", total_plays=1, scores=[15], states=[GameState.GAME_OVER]
+            game_id="game2",
+            total_plays=1,
+            levels_completed=[15],
+            states=[GameState.GAME_OVER],
         )
 
         scorecard.cards = {"game1": card1, "game2": card2}
@@ -188,6 +191,7 @@ class TestRandomAgent:
             agent_name="test-agent",
             ROOT_URL="https://example.com",
             record=False,
+            arc_env=Mock(),
         )
 
         assert agent.game_id == "test-game"
@@ -207,6 +211,7 @@ class TestRandomAgent:
             agent_name="test-agent",
             ROOT_URL="https://example.com",
             record=False,
+            arc_env=Mock(),
         )
 
         sample_frame.state = GameState.NOT_PLAYED
@@ -234,6 +239,7 @@ class TestLangGraphRandomAgent:
             agent_name="test-agent",
             ROOT_URL="https://example.com",
             record=False,
+            arc_env=Mock(),
         )
 
         assert agent.game_id == "test-game"
@@ -256,6 +262,7 @@ class TestLangGraphRandomAgent:
             agent_name="test-agent",
             ROOT_URL="https://example.com",
             record=False,
+            arc_env=Mock(),
         )
 
         # NOT_PLAYED state -> RESET
@@ -288,11 +295,11 @@ class TestFrameData:
             game_id="test",
             frame=[[[1, 2], [3, 4]]],
             state=GameState.NOT_FINISHED,
-            score=10,
+            levels_completed=10,
         )
 
         assert frame.game_id == "test"
-        assert frame.score == 10
+        assert frame.levels_completed == 10
         assert frame.state == GameState.NOT_FINISHED
         assert not frame.is_empty()
 
@@ -300,13 +307,13 @@ class TestFrameData:
         assert frame.game_id == ""
         assert frame.frame == []
         assert frame.state == GameState.NOT_PLAYED
-        assert frame.score == 0
+        assert frame.levels_completed == 0
         assert frame.is_empty()
         assert frame.guid is None
         assert frame.full_reset is False
 
     @pytest.mark.parametrize(
-        "score,should_pass",
+        "levels_completed,should_pass",
         [
             (0, True),
             (254, True),
@@ -314,13 +321,13 @@ class TestFrameData:
             (255, False),
         ],
     )
-    def test_score_validation(self, score, should_pass):
+    def test_score_validation(self, levels_completed, should_pass):
         if should_pass:
-            frame = FrameData(score=score)
-            assert frame.score == score
+            frame = FrameData(levels_completed=levels_completed)
+            assert frame.levels_completed == levels_completed
         else:
             with pytest.raises(Exception):
-                FrameData(score=score)
+                FrameData(levels_completed=levels_completed)
 
     def test_frame_2(self):
         action_input = ActionInput(
@@ -350,7 +357,9 @@ class TestFrameData:
             [[9, 8, 7], [6, 5, 4], [3, 2, 1]],
         ]
 
-        frame = FrameData(game_id="complex-test", frame=complex_frame, score=50)
+        frame = FrameData(
+            game_id="complex-test", frame=complex_frame, levels_completed=50
+        )
 
         assert frame.frame == complex_frame
         assert not frame.is_empty()
