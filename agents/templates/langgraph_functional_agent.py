@@ -14,12 +14,16 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.func import entrypoint
 from langgraph.pregel import Pregel
 from langsmith.schemas import Attachment
-from openai import OpenAI
 from openai.types.chat import ChatCompletionMessage
 
 from agents.templates.llm_agents import LLM
 
 from ..agent import Agent
+from ..openai_utils import (
+    create_openai_client,
+    log_openai_request,
+    log_openai_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +56,7 @@ def build_agent(
 ) -> Pregel[State, entrypoint.final[ChatCompletionMessage, State]]:
     """Define the agent logic."""
     # Modify this code to add things like reasoning, planning, etc.
-    openai_client = OpenAI()
+    openai_client = create_openai_client()
     model_kwargs = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
 
     @ls.traceable(run_type="prompt")  # type: ignore[misc]
@@ -90,13 +94,17 @@ def build_agent(
         tool_choice: str = "required",
         **kwargs: Any,
     ) -> ChatCompletionMessage:
-        return openai_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=tools,
-            tool_choice=tool_choice,
+        request = {
+            "model": model,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": tool_choice,
             **kwargs,
-        )
+        }
+        log_openai_request(logger, "LangGraph functional agent", request)
+        response = openai_client.chat.completions.create(**request)
+        log_openai_response(logger, "LangGraph functional agent", response)
+        return response
 
     @entrypoint(checkpointer=InMemorySaver())  # type: ignore[misc]
     def agent(

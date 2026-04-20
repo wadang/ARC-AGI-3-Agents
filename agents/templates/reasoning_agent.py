@@ -2,14 +2,19 @@ import base64
 import io
 import json
 import logging
+import os
 import textwrap
 from typing import Any, Dict, List, Literal
 
 from arcengine import FrameData, GameAction
-from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel, Field
 
+from ..openai_utils import (
+    create_openai_client,
+    log_openai_request,
+    log_openai_response,
+)
 from .llm_agents import ReasoningLLM
 
 logger = logging.getLogger(__name__)
@@ -56,7 +61,24 @@ class ReasoningAgent(ReasoningLLM):
         self.history: List[ReasoningActionResponse] = []
         self.screen_history: List[bytes] = []
         self.max_screen_history = 10  # Limit screen history to prevent memory leak
-        self.client = OpenAI()
+        self.client = create_openai_client()
+
+    def save_screen_image(self, image_bytes: bytes, latest_frame: FrameData) -> str:
+        """Persist the rendered screen image for later inspection."""
+        recordings_dir = os.environ.get("RECORDINGS_DIR", "recordings") or "recordings"
+        output_dir = os.path.join(recordings_dir, "reasoning_screens", self.game_id)
+        os.makedirs(output_dir, exist_ok=True)
+
+        guid = latest_frame.guid or "no-guid"
+        filename = (
+            f"{self.action_counter:04d}_lvl{latest_frame.levels_completed:02d}_"
+            f"{latest_frame.state.name.lower()}_{guid}.png"
+        )
+        output_path = os.path.join(output_dir, filename)
+        with open(output_path, "wb") as f:
+            f.write(image_bytes)
+        logger.info("Saved reasoning screen image to %s", output_path)
+        return output_path
 
     def clear_history(self) -> None:
         """Clear all history when transitioning between levels."""
@@ -250,13 +272,20 @@ Hint:
         """Call LLM with structured output parsing for reasoning agent."""
         try:
             tools = self.build_tools()
-
+            create_kwargs = {
+                "model": self.MODEL,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": "required",
+            }
+            log_openai_request(logger, "Reasoning agent", create_kwargs)
             response = self.client.chat.completions.create(
                 model=self.MODEL,
                 messages=messages,
                 tools=tools,
                 tool_choice="required",
             )
+            log_openai_response(logger, "Reasoning agent", response)
 
             self.track_tokens(
                 response.usage.total_tokens, response.choices[0].message.content
@@ -282,6 +311,7 @@ Hint:
         # Generate map image
         current_grid = latest_frame.frame[-1] if latest_frame.frame else []
         map_image = self.generate_grid_image_with_zone(current_grid)
+        self.save_screen_image(map_image, latest_frame)
 
         # Build messages
         system_prompt = self.build_user_prompt(latest_frame)

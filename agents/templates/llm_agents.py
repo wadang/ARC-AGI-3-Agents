@@ -1,14 +1,17 @@
 import json
 import logging
-import os
 import textwrap
 from typing import Any, Optional
 
 import openai
 from arcengine import FrameData, GameAction, GameState
-from openai import OpenAI as OpenAIClient
 
 from ..agent import Agent
+from ..openai_utils import (
+    create_openai_client,
+    log_openai_request,
+    log_openai_response,
+)
 
 logger = logging.getLogger()
 
@@ -60,7 +63,7 @@ class LLM(Agent):
         logging.getLogger("openai").setLevel(logging.CRITICAL)
         logging.getLogger("httpx").setLevel(logging.CRITICAL)
 
-        client = OpenAIClient(api_key=os.environ.get("OPENAI_API_KEY", ""))
+        client = create_openai_client()
 
         functions = self.build_functions()
         tools = self.build_tools()
@@ -121,7 +124,9 @@ class LLM(Agent):
                 }
                 if self.REASONING_EFFORT is not None:
                     create_kwargs["reasoning_effort"] = self.REASONING_EFFORT
+                log_openai_request(logger, "LLM observation", create_kwargs)
                 response = client.chat.completions.create(**create_kwargs)
+                log_openai_response(logger, "LLM observation", response)
             except openai.BadRequestError as e:
                 logger.info(f"Message dump: {self.messages}")
                 raise e
@@ -155,7 +160,9 @@ class LLM(Agent):
                 }
                 if self.REASONING_EFFORT is not None:
                     create_kwargs["reasoning_effort"] = self.REASONING_EFFORT
+                log_openai_request(logger, "LLM action", create_kwargs)
                 response = client.chat.completions.create(**create_kwargs)
+                log_openai_response(logger, "LLM action", response)
             except openai.BadRequestError as e:
                 logger.info(f"Message dump: {self.messages}")
                 raise e
@@ -193,7 +200,9 @@ class LLM(Agent):
                 }
                 if self.REASONING_EFFORT is not None:
                     create_kwargs["reasoning_effort"] = self.REASONING_EFFORT
+                log_openai_request(logger, "LLM action", create_kwargs)
                 response = client.chat.completions.create(**create_kwargs)
+                log_openai_response(logger, "LLM action", response)
             except openai.BadRequestError as e:
                 logger.info(f"Message dump: {self.messages}")
                 raise e

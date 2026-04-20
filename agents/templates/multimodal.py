@@ -5,7 +5,6 @@ import base64
 import io
 import json
 import logging
-import os
 import re
 from textwrap import dedent
 from typing import Any, List, Optional, Sequence, Tuple
@@ -13,11 +12,15 @@ from typing import Any, List, Optional, Sequence, Tuple
 import numpy as np
 import openai
 from arcengine import FrameData, GameAction, GameState
-from openai import OpenAI as OpenAIClient
 from openai.types.chat import ChatCompletion
 from PIL import Image
 
 from ..agent import Agent
+from ..openai_utils import (
+    create_openai_client,
+    log_openai_request,
+    log_openai_response,
+)
 
 logger = logging.getLogger()
 
@@ -319,7 +322,7 @@ class MultiModalLLM(Agent):
             # add a small delay before resetting after GAME_OVER to avoid timeout
             return GameAction.RESET
 
-        client = OpenAIClient(api_key=os.environ.get("OPENAI_SECRET_KEY", ""))
+        client = create_openai_client(("OPENAI_API_KEY", "OPENAI_SECRET_KEY"))
         # client = OpenAIClient(
         #     base_url="https://openrouter.ai/api/v1",
         #     api_key=os.environ.get("OPEN_ROUTER_KEY", "")
@@ -392,15 +395,14 @@ class MultiModalLLM(Agent):
                 ],
             )
 
-            response = client.chat.completions.create(
-                model=self.MODEL,
-                messages=[
+            analysis_request = {
+                "model": self.MODEL,
+                "messages": [
                     {"role": "system", "content": self.SYSTEM_PROMOT},
                     {
                         "role": "user",
                         "content": [
                             {"type": "text", "text": self._previous_prompt},
-                            # *self._previous_images
                         ],
                     },
                     {
@@ -412,8 +414,10 @@ class MultiModalLLM(Agent):
                         "content": msg_parts,
                     },
                 ],
-                # extra_body={"reasoning": {"enabled": True}}
-            )
+            }
+            log_openai_request(logger, "Multimodal analysis", analysis_request)
+            response = client.chat.completions.create(**analysis_request)
+            log_openai_response(logger, "Multimodal analysis", response)
             analysis_message = response.choices[0].message.content
             logger.info(f"Assistant - Analysis: {analysis_message}")
             before, _, after = analysis_message.partition("---")  # fastest single-split
@@ -432,9 +436,9 @@ class MultiModalLLM(Agent):
         else:
             self._previous_prompt = f"{self._memory_prompt}\n\n{self.ACTION_INSTRUCT}"
         try:
-            response = client.chat.completions.create(
-                model=self.MODEL,
-                messages=[
+            action_request = {
+                "model": self.MODEL,
+                "messages": [
                     {"role": "system", "content": self.SYSTEM_PROMOT},
                     {
                         "role": "user",
@@ -447,9 +451,10 @@ class MultiModalLLM(Agent):
                         ],
                     },
                 ],
-                # extra_body={"reasoning": {"enabled": True}}
-                # reasoning_effort=self.REASONING_EFFORT,
-            )
+            }
+            log_openai_request(logger, "Multimodal next action", action_request)
+            response = client.chat.completions.create(**action_request)
+            log_openai_response(logger, "Multimodal next action", response)
         except openai.BadRequestError as e:
             logger.info(f"Message dump: {self.messages}")
             raise e
@@ -469,9 +474,9 @@ class MultiModalLLM(Agent):
             raise ValueError("No 'human_action' field in the response JSON")
 
         try:
-            response = client.chat.completions.create(
-                model=self.MODEL,
-                messages=[
+            find_action_request = {
+                "model": self.MODEL,
+                "messages": [
                     {"role": "system", "content": self.SYSTEM_PROMOT},
                     {
                         "role": "user",
@@ -486,9 +491,12 @@ class MultiModalLLM(Agent):
                         ],
                     },
                 ],
-                # extra_body={"reasoning": {"enabled": True}}
-                # reasoning_effort=self.REASONING_EFFORT,
+            }
+            log_openai_request(
+                logger, "Multimodal action translation", find_action_request
             )
+            response = client.chat.completions.create(**find_action_request)
+            log_openai_response(logger, "Multimodal action translation", response)
         except openai.BadRequestError as e:
             logger.info(f"Message dump: {e}")
             raise e
